@@ -50,18 +50,6 @@ const PRODUCT_CATALOG = [
     skinTypes: ["grasa", "mixta", "normal", "sensible"],
     problems: ["manchas", "acne", "sensibilidad"],
   },
-  {
-    id: "barrier-cream",
-    name: "Crema barrera con ceramidas",
-    category: "hidratante",
-    tiers: {
-      low: { label: "Opción económica", price: 12, affiliateUrl: "https://target.com" },
-      mid: { label: "Opción media", price: 22, affiliateUrl: "https://amazon.com" },
-      premium: { label: "Opción premium", price: 38, affiliateUrl: "https://dermstore.com" },
-    },
-    skinTypes: ["seca", "sensible"],
-    problems: ["sensibilidad", "manchas"],
-  },
 ];
 
 const commitmentCap = { bajo: 3, medio: 4, alto: 5 };
@@ -86,7 +74,11 @@ const applyRules = (quiz, elapsedDays = 1, streak = 0) => {
   const rules = [];
   let maxSteps = commitmentCap[quiz.commitment] ?? 4;
   const blockedIngredients = [];
-  const introPlan = ["Día 1-3: limpieza + hidratante", "Día 5: añadir hidratante objetivo", "Día 10: introducir SPF diario"];
+  const introPlan = [
+    "Día 1-3: limpieza + hidratante",
+    "Día 5: añadir hidratante objetivo",
+    "Día 10: introducir SPF diario",
+  ];
 
   if (quiz.skinType === "grasa" && quiz.problems.includes("acne")) {
     rules.push("Evitar texturas pesadas y aceites oclusivos");
@@ -200,22 +192,57 @@ export default function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Compinche Space</p>
-          <h1>Plataforma de autocuidado con lógica de negocio</h1>
+          <h1>Tu espacio íntimo para volver a ti</h1>
         </div>
-        {screen !== "landing" && <button onClick={() => setScreen("landing")}>Inicio</button>}
+        {screen !== "landing" && (
+          <button className="ghost" onClick={() => setScreen("landing")}>
+            Volver al inicio
+          </button>
+        )}
       </header>
 
       {screen === "landing" && (
-        <section className="panel hero">
-          <h2>Descubre tu rutina ideal en 2 minutos</h2>
-          <p>Diagnóstico guiado + motor de reglas + progresión por adherencia.</p>
-          <button onClick={() => setScreen("quiz")}>Hacer diagnóstico</button>
-        </section>
+        <>
+          <section className="panel hero">
+            <p className="badge">Bienestar emocional + autocuidado guiado</p>
+            <h2>Descubre tu rutina ideal en 2 minutos</h2>
+            <p className="hero-copy">
+              No necesitas hacerlo perfecto, solo empezar con una guía que se adapta a tu momento.
+              Compinche Space convierte tu diagnóstico en una rutina realista, humana y evolutiva.
+            </p>
+            <div className="cta-row">
+              <button onClick={() => setScreen("quiz")}>Quiero mi diagnóstico personal</button>
+              <button className="secondary" onClick={() => setScreen("dashboard")}>
+                Ver demo del dashboard
+              </button>
+            </div>
+          </section>
+
+          <section className="story-grid">
+            <article className="panel story-card">
+              <h3>1. Lo que hoy te frena</h3>
+              <p>Demasiada información, poca claridad y cero constancia.</p>
+            </article>
+            <article className="panel story-card">
+              <h3>2. Tu punto de conexión</h3>
+              <p>Un diagnóstico breve que entiende tu piel, energía y compromiso real.</p>
+            </article>
+            <article className="panel story-card">
+              <h3>3. Tu solución práctica</h3>
+              <p>Rutina personalizada con productos por presupuesto y progresión sostenible.</p>
+            </article>
+            <article className="panel story-card">
+              <h3>4. Tu siguiente paso</h3>
+              <p>Guarda tu plan, haz check diario y evoluciona cuando estés lista.</p>
+            </article>
+          </section>
+        </>
       )}
 
       {screen === "quiz" && (
         <section className="panel">
-          <h2>Quiz de diagnóstico</h2>
+          <h2>Diagnóstico consciente</h2>
+          <p className="helper">Te tomará 2 minutos. Esto alimenta el motor de recomendaciones.</p>
           <div className="grid">
             <label>
               Tipo de piel
@@ -228,7 +255,7 @@ export default function App() {
               </select>
             </label>
             <label>
-              Compromiso
+              Nivel de compromiso
               <select value={quiz.commitment} onChange={(e) => setQuiz({ ...quiz, commitment: e.target.value })}>
                 <option value="bajo">Bajo</option>
                 <option value="medio">Medio</option>
@@ -244,22 +271,30 @@ export default function App() {
               </select>
             </label>
           </div>
-          <p className="label">Problemas principales</p>
+          <p className="label">¿Qué quieres mejorar primero?</p>
           <div className="chips">
             {["acne", "manchas", "grasa", "sensibilidad"].map((problem) => (
-              <button key={problem} className={quiz.problems.includes(problem) ? "chip active" : "chip"} onClick={() => toggleProblem(problem)}>
+              <button
+                key={problem}
+                className={quiz.problems.includes(problem) ? "chip active" : "chip"}
+                onClick={() => toggleProblem(problem)}
+              >
                 {problem}
               </button>
             ))}
           </div>
-          <button disabled={!quiz.skinType || quiz.problems.length === 0} onClick={() => setScreen("results")}>Ver resultado</button>
+          <button disabled={!quiz.skinType || quiz.problems.length === 0} onClick={() => setScreen("results")}>
+            Ver mi resultado
+          </button>
         </section>
       )}
 
       {screen === "results" && (
         <section className="panel">
-          <h2>Resultado personalizado</h2>
-          <p><strong>Perfil:</strong> {generated.profileLabel}</p>
+          <h2>Este plan sí se siente tuyo</h2>
+          <p>
+            <strong>Perfil:</strong> {generated.profileLabel}
+          </p>
           <div className="split">
             <article>
               <h3>Mañana</h3>
@@ -271,11 +306,13 @@ export default function App() {
             </article>
           </div>
 
-          <h3>Productos recomendados con afiliados</h3>
+          <h3>Recomendaciones con afiliados</h3>
           <div className="cards">
             {generated.productRecommendations.map((product) => (
               <div key={product.name} className="card">
-                <p><strong>{product.name}</strong></p>
+                <p>
+                  <strong>{product.name}</strong>
+                </p>
                 <a href={product.economical.affiliateUrl}>Económica (${product.economical.price})</a>
                 <a href={product.middle.affiliateUrl}>Media (${product.middle.price})</a>
                 <a href={product.premium.affiliateUrl}>Premium (${product.premium.price})</a>
@@ -284,37 +321,42 @@ export default function App() {
           </div>
 
           <div className="cta-row">
-            <button onClick={saveRoutine}>Guarda tu rutina gratis</button>
-            <button className="secondary" onClick={() => setScreen("dashboard")}>Desbloquea tu rutina inteligente que evoluciona contigo</button>
+            <button onClick={saveRoutine}>Guardar rutina gratis</button>
+            <button className="secondary" onClick={() => setScreen("dashboard")}>
+              Desbloquear rutina inteligente
+            </button>
           </div>
         </section>
       )}
 
       {screen === "dashboard" && (
         <section className="panel">
-          <h2>Dashboard</h2>
-          <p>Fase actual: <strong>{generated.phase}</strong> · Streak: <strong>{streak}</strong> días</p>
+          <h2>Dashboard evolutivo</h2>
+          <p>
+            Fase actual: <strong>{generated.phase}</strong> · Streak: <strong>{streak}</strong> días
+          </p>
           <div className="split">
             <article>
               <h3>Rutina actual</h3>
-              <p>Mañana y noche por día:</p>
               <ul>
-                <li>Lunes a domingo (mañana): {generated.morningSteps.join(" → ")}</li>
-                <li>Lunes a domingo (noche): {generated.nightSteps.join(" → ")}</li>
+                <li>Mañana: {generated.morningSteps.join(" → ")}</li>
+                <li>Noche: {generated.nightSteps.join(" → ")}</li>
               </ul>
             </article>
             <article>
               <h3>Tracker de hábitos</h3>
-              <p>Día {elapsedDays}: marca completado para habilitar progresión.</p>
+              <p>Día {elapsedDays}: cada check acelera tu siguiente fase.</p>
               <div className="cta-row">
-                <button onClick={() => markHabit("morning")}>Check mañana</button>
-                <button onClick={() => markHabit("night")}>Check noche</button>
+                <button onClick={() => markHabit("morning")}>Hice la mañana</button>
+                <button onClick={() => markHabit("night")}>Hice la noche</button>
               </div>
-              <p>Hoy: mañana {habitLog[dayKey()]?.morning ? "✅" : "⬜"} · noche {habitLog[dayKey()]?.night ? "✅" : "⬜"}</p>
+              <p>
+                Hoy: mañana {habitLog[dayKey()]?.morning ? "✅" : "⬜"} · noche {habitLog[dayKey()]?.night ? "✅" : "⬜"}
+              </p>
             </article>
           </div>
 
-          <h3>Sistema de progresión</h3>
+          <h3>Progresión personalizada</h3>
           <ul>
             {generated.introPlan.map((rule) => <li key={rule}>{rule}</li>)}
           </ul>
