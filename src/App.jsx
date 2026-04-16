@@ -304,6 +304,8 @@ export default function App() {
                 <textarea value={routineInput} onChange={(e) => setRoutineInput(e.target.value)} placeholder="Escribe aquí sin juicio" />
                 <button onClick={() => setCelebration("Tus pensamientos también merecen espacio")}>Me quedo con esto</button>
               </div>
+            ) : (
+              <p>Completa tu diagnóstico para personalizarlo.</p>
             )}
 
             {activeRoutine === "sleep" && routineStepIndex === 1 && (
