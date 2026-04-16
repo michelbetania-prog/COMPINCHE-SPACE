@@ -1,554 +1,334 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  createUserWithEmailAndPassword,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut,
-  updateProfile,
-} from "firebase/auth";
-import {
-  doc,
-  onSnapshot,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore";
-import { auth, db } from "./firebase";
-import { challenges, motivationalMessages } from "./data/challenges";
 import "./styles.css";
 
-const viewStates = {
-  welcome: "welcome",
-  onboarding: "onboarding",
-  challenges: "challenges",
-  active: "active",
-  progress: "progress",
+const PRODUCT_CATALOG = [
+  { id: "sleep-tea", name: "Infusión relajante nocturna", benefit: "Ayuda a desacelerar antes de dormir", image: "🍵", tag: "Bienestar", link: "https://amazon.com" },
+  { id: "journaling-notebook", name: "Journal de claridad diaria", benefit: "Ordena ideas y emociones en 5 minutos", image: "📓", tag: "Journaling", link: "https://amazon.com" },
+  { id: "focus-timer", name: "Timer visual de enfoque", benefit: "Sostiene bloques sin distracciones", image: "⏱️", tag: "Productividad", link: "https://walmart.com" },
+  { id: "stress-rollon", name: "Roll-on calmante", benefit: "Micro pausa para resetear tensión", image: "🌿", tag: "Estrés", link: "https://target.com" },
+];
+
+const LEVELS = [
+  { min: 0, label: "🌱 Semilla", note: "Cada paso pequeño ya cuenta." },
+  { min: 15, label: "🌿 En proceso", note: "Ya no estás empezando, estás construyendo." },
+  { min: 30, label: "🌸 Floreciendo", note: "Ya no estás empezando… estás creciendo." },
+  { min: 55, label: "✨ En expansión", note: "Tu constancia está creando nueva energía." },
+  { min: 85, label: "💫 Compinche Pro", note: "Tu presencia diaria inspira tu propio cambio." },
+];
+
+const dailyMessages = [
+  "Hoy tu espacio se siente suave y posible ✨",
+  "Tu bienestar también es productividad inteligente 🌿",
+  "No necesitas hacer todo, solo avanzar con calma 💫",
+  "Respira: hoy también puedes volver a ti 💖",
+];
+
+const journalingTypes = [
+  { title: "🧠 Mental clarity", prompt: "¿Qué pensamiento ocupa demasiado espacio hoy?" },
+  { title: "💖 Emocional", prompt: "¿Qué emoción necesita ser escuchada ahora?" },
+  { title: "🎯 Enfoque del día", prompt: "¿Qué cambio haría valioso tu día de hoy?" },
+  { title: "🌱 Gratitud", prompt: "Nombra 3 cosas simples por las que agradeces hoy." },
+];
+
+const routineTemplates = {
+  sleep: {
+    title: "😴 Modo descanso profundo",
+    color: "sleep",
+    steps: [
+      { label: "🌗 Check-out emocional", helper: "¿Cómo te sientes antes de dormir?" },
+      { label: "🧠 Vaciar mente", helper: "Escribe 1 cosa que te preocupa y suéltala aquí" },
+      { label: "📵 Desconexión", helper: "Deja el celular y haz 1 minuto de respiración guiada" },
+      { label: "🌿 Ritual final", helper: "Skincare opcional + té/agua" },
+    ],
+    close: "Mañana será más ligero. Descansa.",
+  },
+  journaling: {
+    title: "✍️ Hablar contigo",
+    color: "journal",
+    steps: [
+      { label: "Selecciona tu tipo", helper: "Rota entre claridad, emoción, enfoque y gratitud" },
+      { label: "Pregunta guiada", helper: "Escribe sin filtro durante 2 minutos" },
+      { label: "Guardar pensamiento", helper: "Tus pensamientos también merecen espacio" },
+    ],
+    close: "Me quedo con esto. Gracias por escucharte.",
+  },
+  stress: {
+    title: "😮‍💨 Reset de 3 minutos",
+    color: "stress",
+    steps: [
+      { label: "⏸️ Pausa", helper: "Respira, no todo es urgente" },
+      { label: "🌬️ Respiración guiada", helper: "Inhala 4 · pausa 4 · exhala 6" },
+      { label: "🧠 Reenfoque", helper: "¿Qué es lo único importante ahora?" },
+      { label: "⚡ Acción simple", helper: "Vuelve con claridad" },
+    ],
+    close: "Tu mente está más clara. Seguimos suave.",
+  },
+  focus: {
+    title: "⚡ Modo enfoque",
+    color: "focus",
+    steps: [
+      { label: "🎯 Define tarea", helper: "Una prioridad concreta" },
+      { label: "⏱️ Pomodoro simple", helper: "Enfócate sin multitarea" },
+      { label: "🔕 Sin distracciones", helper: "Silencia notificaciones por este bloque" },
+      { label: "✅ Cierre", helper: "No necesitas hacer todo… solo avanzar" },
+    ],
+    close: "Trabajo hecho. Ahora respira 1 minuto.",
+  },
 };
 
-const getTodayKey = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
+const dayKey = () => new Date().toISOString().slice(0, 10);
 
-const addDays = (dateString, daysToAdd) => {
-  const date = new Date(dateString);
-  date.setDate(date.getDate() + daysToAdd);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+const secondsToClock = (seconds) => {
+  const min = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const sec = String(seconds % 60).padStart(2, "0");
+  return `${min}:${sec}`;
 };
-
-const diffInDays = (startDate) => {
-  const start = new Date(startDate);
-  const today = new Date();
-  const startMidnight = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate()
-  );
-  const todayMidnight = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  );
-  return Math.floor((todayMidnight - startMidnight) / (1000 * 60 * 60 * 24));
-};
-
-const getMotivation = () => {
-  const index = Math.floor(Math.random() * motivationalMessages.length);
-  return motivationalMessages[index];
-};
-
-const getCompletionRatio = (dayEntry, habits) => {
-  if (!dayEntry) return 0;
-  const completedCount = Object.values(dayEntry.completed || {}).filter(Boolean)
-    .length;
-  return completedCount / habits.length;
-};
-
-const createDayEntry = (habits) => ({
-  completed: habits.reduce((acc, _, index) => {
-    acc[index] = false;
-    return acc;
-  }, {}),
-});
 
 export default function App() {
-  const [authUser, setAuthUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [view, setView] = useState(viewStates.welcome);
-  const [formState, setFormState] = useState({
-    email: "",
-    password: "",
-    name: "",
-  });
-  const [authError, setAuthError] = useState("");
-  const [motivation, setMotivation] = useState(getMotivation());
+  const [screen, setScreen] = useState("home");
+  const [name] = useState("Compinche");
+  const [energyMode, setEnergyMode] = useState("low");
+  const [activeRoutine, setActiveRoutine] = useState(null);
+  const [routineStepIndex, setRoutineStepIndex] = useState(0);
+  const [routineInput, setRoutineInput] = useState("");
+  const [celebration, setCelebration] = useState("");
+  const [streakPulse, setStreakPulse] = useState(false);
+  const [timerSeconds, setTimerSeconds] = useState(25 * 60);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [dailyHistory, setDailyHistory] = useState({});
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setAuthUser(user);
-      if (!user) {
-        setProfile(null);
-        setView(viewStates.welcome);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+  const today = dayKey();
+  const todayData = dailyHistory[today] || { completed: [], thoughts: [] };
 
-  useEffect(() => {
-    if (!authUser) return undefined;
+  const dailyMessage = useMemo(() => dailyMessages[new Date().getDate() % dailyMessages.length], []);
+  const todayJournal = journalingTypes[new Date().getDate() % journalingTypes.length];
 
-    const userRef = doc(db, "users", authUser.uid);
-    const unsubscribe = onSnapshot(userRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        const baseProfile = {
-          displayName: authUser.displayName || "",
-          onboarded: false,
-          recommendedChallengeId: "",
-          activeChallenge: null,
-        };
-        setDoc(userRef, baseProfile, { merge: true });
-        setProfile(baseProfile);
-        setView(viewStates.onboarding);
-        return;
-      }
-
-      const data = snapshot.data();
-      setProfile(data);
-      if (!data.onboarded) {
-        setView(viewStates.onboarding);
-      } else if (!data.activeChallenge) {
-        setView(viewStates.challenges);
-      } else {
-        setView(viewStates.active);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [authUser]);
-
-  useEffect(() => {
-    setMotivation(getMotivation());
-  }, [view]);
-
-  const handleAuthChange = (event) => {
-    setFormState((prev) => ({ ...prev, [event.target.name]: event.target.value }));
-  };
-
-  const handleRegister = async (event) => {
-    event.preventDefault();
-    setAuthError("");
-    const { email, password, name } = formState;
-    try {
-      const credential = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        password
-      );
-      if (name) {
-        await updateProfile(credential.user, { displayName: name });
-      }
-    } catch (error) {
-      setAuthError(error.message);
+  const streak = useMemo(() => {
+    const days = Object.keys(dailyHistory).sort().reverse();
+    let count = 0;
+    for (const day of days) {
+      if ((dailyHistory[day]?.completed?.length || 0) > 0) count += 1;
+      else break;
     }
+    return count;
+  }, [dailyHistory]);
+
+  const completedToday = todayData.completed.length;
+  const dayProgress = Math.round((completedToday / 4) * 100);
+  const totalCompleted = useMemo(() => Object.values(dailyHistory).reduce((sum, day) => sum + (day.completed?.length || 0), 0), [dailyHistory]);
+  const score = streak * 2 + totalCompleted;
+  const userLevel = useMemo(() => LEVELS.slice().reverse().find((lvl) => score >= lvl.min) || LEVELS[0], [score]);
+  const nextLevel = useMemo(() => LEVELS.find((lvl) => lvl.min > score), [score]);
+  const levelProgress = nextLevel ? Math.round(((score - userLevel.min) / (nextLevel.min - userLevel.min)) * 100) : 100;
+
+  const badges = useMemo(() => {
+    const list = [];
+    if (streak >= 3) list.push("🎖️ Constancia inicial");
+    if (streak >= 7) list.push("🔓 Calma nivel 2");
+    if (totalCompleted >= 12) list.push("🎁 Compinche activo");
+    return list;
+  }, [streak, totalCompleted]);
+
+  const compincheOfDay = PRODUCT_CATALOG[new Date().getDate() % PRODUCT_CATALOG.length];
+  const suggestedOrder = energyMode === "low" ? ["sleep", "stress", "journaling", "focus"] : ["focus", "journaling", "stress", "sleep"];
+
+  const currentFlow = activeRoutine ? routineTemplates[activeRoutine] : null;
+  const currentStep = currentFlow?.steps[routineStepIndex];
+  const stepProgress = currentFlow ? Math.round((routineStepIndex / currentFlow.steps.length) * 100) : 0;
+
+  useEffect(() => {
+    if (!timerRunning) return undefined;
+    const interval = setInterval(() => {
+      setTimerSeconds((prev) => {
+        if (prev <= 1) {
+          setTimerRunning(false);
+          setCelebration("Pomodoro completado. No necesitas hacer todo… solo avanzar.");
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timerRunning]);
+
+  useEffect(() => {
+    if (streak <= 0) return;
+    setStreakPulse(true);
+    const timer = setTimeout(() => setStreakPulse(false), 900);
+    return () => clearTimeout(timer);
+  }, [streak]);
+
+  const startRoutine = (key) => {
+    setActiveRoutine(key);
+    setRoutineStepIndex(0);
+    setRoutineInput("");
+    setCelebration("");
+    setScreen("flow");
   };
 
-  const handleLogin = async (event) => {
-    event.preventDefault();
-    setAuthError("");
-    const { email, password } = formState;
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      setAuthError(error.message);
-    }
-  };
-
-  const handleLogout = async () => {
-    await signOut(auth);
-  };
-
-  const handleOnboarding = async (recommendedId) => {
-    if (!authUser) return;
-    await updateDoc(doc(db, "users", authUser.uid), {
-      onboarded: true,
-      recommendedChallengeId: recommendedId,
-    });
-    setView(viewStates.challenges);
-  };
-
-  const startChallenge = async (challenge) => {
-    if (!authUser) return;
-    const startDate = new Date().toISOString();
-    const dayKey = getTodayKey();
-    const dayEntry = createDayEntry(challenge.habits);
-
-    await updateDoc(doc(db, "users", authUser.uid), {
-      activeChallenge: {
-        id: challenge.id,
-        title: challenge.title,
-        duration: challenge.duration,
-        habits: challenge.habits,
-        startDate,
-        daily: {
-          [dayKey]: dayEntry,
+  const completeRoutine = () => {
+    setDailyHistory((prev) => {
+      const existing = prev[today] || { completed: [], thoughts: [] };
+      const nextCompleted = existing.completed.includes(activeRoutine)
+        ? existing.completed
+        : [...existing.completed, activeRoutine];
+      const nextThoughts = routineInput ? [...existing.thoughts, routineInput] : existing.thoughts;
+      return {
+        ...prev,
+        [today]: {
+          ...existing,
+          completed: nextCompleted,
+          thoughts: nextThoughts,
         },
-      },
+      };
     });
-    setView(viewStates.active);
+
+    const bridgeMessage = activeRoutine === "focus"
+      ? "Ahora respira 1 minuto para cuidar tu energía 🌬️"
+      : activeRoutine === "journaling"
+        ? "Ahora define tu siguiente acción ⚡"
+        : "Lo hiciste hoy. Y eso cuenta.";
+
+    setCelebration(bridgeMessage);
+    setScreen("home");
+    setActiveRoutine(null);
+    setRoutineStepIndex(0);
+    setRoutineInput("");
   };
 
-  const updateDailyHabit = async (habitIndex) => {
-    if (!authUser || !profile?.activeChallenge) return;
-    const dayKey = getTodayKey();
-    const activeChallenge = profile.activeChallenge;
-    const existingDay =
-      activeChallenge.daily?.[dayKey] || createDayEntry(activeChallenge.habits);
-
-    const updatedDay = {
-      ...existingDay,
-      completed: {
-        ...existingDay.completed,
-        [habitIndex]: !existingDay.completed?.[habitIndex],
-      },
-    };
-
-    await updateDoc(doc(db, "users", authUser.uid), {
-      [`activeChallenge.daily.${dayKey}`]: updatedDay,
-    });
+  const nextStep = () => {
+    if (!currentFlow) return;
+    if (routineStepIndex < currentFlow.steps.length - 1) {
+      setRoutineStepIndex((prev) => prev + 1);
+      setCelebration(["Sigue así", "Vas bien", "Un paso más"][routineStepIndex % 3]);
+      return;
+    }
+    completeRoutine();
   };
 
-  const ensureToday = async () => {
-    if (!authUser || !profile?.activeChallenge) return;
-    const dayKey = getTodayKey();
-    const activeChallenge = profile.activeChallenge;
-    if (activeChallenge.daily?.[dayKey]) return;
-
-    const dayEntry = createDayEntry(activeChallenge.habits);
-    await updateDoc(doc(db, "users", authUser.uid), {
-      [`activeChallenge.daily.${dayKey}`]: dayEntry,
-    });
+  const startPomodoro = () => {
+    setTimerSeconds(25 * 60);
+    setTimerRunning(true);
   };
-
-  useEffect(() => {
-    ensureToday();
-  }, [profile?.activeChallenge]);
-
-  const activeChallenge = profile?.activeChallenge;
-  const todayKey = getTodayKey();
-
-  const todayEntry = useMemo(() => {
-    if (!activeChallenge) return null;
-    return activeChallenge.daily?.[todayKey] || null;
-  }, [activeChallenge, todayKey]);
-
-  const completionRatio = useMemo(() => {
-    if (!activeChallenge) return 0;
-    return getCompletionRatio(todayEntry, activeChallenge.habits);
-  }, [activeChallenge, todayEntry]);
-
-  const completionPercent = Math.round(completionRatio * 100);
-
-  const validDays = useMemo(() => {
-    if (!activeChallenge) return 0;
-    const entries = Object.values(activeChallenge.daily || {});
-    return entries.filter(
-      (entry) => getCompletionRatio(entry, activeChallenge.habits) >= 0.6
-    ).length;
-  }, [activeChallenge]);
-
-  const totalProgress = useMemo(() => {
-    if (!activeChallenge) return 0;
-    return Math.min(
-      100,
-      Math.round((validDays / activeChallenge.duration) * 100)
-    );
-  }, [activeChallenge, validDays]);
-
-  const dayNumber = useMemo(() => {
-    if (!activeChallenge) return 1;
-    const diff = diffInDays(activeChallenge.startDate) + 1;
-    return Math.min(activeChallenge.duration, Math.max(1, diff));
-  }, [activeChallenge]);
-
-  const isChallengeComplete =
-    activeChallenge && validDays >= activeChallenge.duration;
-
-  const recommendedId = profile?.recommendedChallengeId;
 
   return (
-    <div className="app">
-      <header className="app__header">
+    <main className="app">
+      <header className="topbar panel">
         <div>
-          <p className="eyebrow">Retos suaves de hábitos</p>
-          <h1>Constancia amable</h1>
+          <p className="eyebrow">Hola, {name} 👋</p>
+          <h1>Tu espacio hoy se siente así…</h1>
+          <p className="helper">{dailyMessage}</p>
         </div>
-        {authUser && (
-          <button className="link" type="button" onClick={handleLogout}>
-            Cerrar sesión
-          </button>
-        )}
+        <div className="energy-toggle">
+          <span>Modo según energía</span>
+          <div>
+            <button className={energyMode === "low" ? "energy active" : "energy"} onClick={() => setEnergyMode("low")}>Baja energía</button>
+            <button className={energyMode === "high" ? "energy active" : "energy"} onClick={() => setEnergyMode("high")}>Alta energía</button>
+          </div>
+        </div>
       </header>
 
-      <main className="app__main">
-        {authUser && !profile && (
-          <section className="panel">
-            <h2>Preparando tu espacio</h2>
-            <p>Estamos sincronizando tu información de hábitos.</p>
+      {screen === "home" && (
+        <>
+          <section className="panel home-overview">
+            <article className={streakPulse ? "metric pulse" : "metric"}>
+              <p>🔥 Racha</p>
+              <strong>{streak} días</strong>
+            </article>
+            <article className="metric">
+              <p>📈 Día completado</p>
+              <strong>{dayProgress}%</strong>
+            </article>
+            <article className="metric">
+              <p>{userLevel.label}</p>
+              <strong>Nivel emocional</strong>
+              <small>{userLevel.note}</small>
+            </article>
+            <article className="metric">
+              <p>Progreso al siguiente nivel</p>
+              <div className="progress-track"><div className="progress-fill" style={{ width: `${Math.max(levelProgress, 2)}%` }} /></div>
+              <small>{nextLevel ? `${nextLevel.label} en ${Math.max(nextLevel.min - score, 0)} pts` : "Nivel máximo alcanzado"}</small>
+            </article>
           </section>
-        )}
-        {view === viewStates.welcome && (
-          <section className="panel">
-            <h2>Bienvenida</h2>
-            <p>
-              Esta app te acompaña a cumplir pequeños hábitos diarios con calma y
-              sin presión.
-            </p>
-            <div className="auth">
-              <form className="card" onSubmit={handleRegister}>
-                <h3>Crear cuenta</h3>
-                <label>
-                  Nombre
-                  <input
-                    name="name"
-                    value={formState.name}
-                    onChange={handleAuthChange}
-                    placeholder="Tu nombre"
-                  />
-                </label>
-                <label>
-                  Correo
-                  <input
-                    type="email"
-                    name="email"
-                    value={formState.email}
-                    onChange={handleAuthChange}
-                    placeholder="tu@email.com"
-                    required
-                  />
-                </label>
-                <label>
-                  Contraseña
-                  <input
-                    type="password"
-                    name="password"
-                    value={formState.password}
-                    onChange={handleAuthChange}
-                    placeholder="••••••"
-                    required
-                  />
-                </label>
-                <button type="submit">Crear cuenta</button>
-              </form>
-              <form className="card" onSubmit={handleLogin}>
-                <h3>Iniciar sesión</h3>
-                <p className="helper">
-                  Usa el mismo correo y contraseña.
-                </p>
-                <label>
-                  Correo
-                  <input
-                    type="email"
-                    name="email"
-                    value={formState.email}
-                    onChange={handleAuthChange}
-                    placeholder="tu@email.com"
-                    required
-                  />
-                </label>
-                <label>
-                  Contraseña
-                  <input
-                    type="password"
-                    name="password"
-                    value={formState.password}
-                    onChange={handleAuthChange}
-                    placeholder="••••••"
-                    required
-                  />
-                </label>
-                <button type="submit">Entrar</button>
-              </form>
-            </div>
-            {authError && <p className="error">{authError}</p>}
-          </section>
-        )}
 
-        {view === viewStates.onboarding && (
-          <section className="panel">
-            <h2>Onboarding rápido</h2>
-            <p>
-              Responde con honestidad: ¿qué ritmo sientes más realista para ti?
-            </p>
-            <div className="choices">
-              <button
-                type="button"
-                onClick={() => handleOnboarding("reto-15")}
-              >
-                Quiero empezar suave (15 días)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleOnboarding("reto-21")}
-              >
-                Puedo comprometerme más (21 días)
-              </button>
-            </div>
-            <p className="helper">
-              Recomendaremos un reto, pero siempre podrás elegir.
-            </p>
-          </section>
-        )}
-
-        {view === viewStates.challenges && (
-          <section className="panel">
-            <h2>Elige tu reto</h2>
-            <p>Selecciona el desafío que mejor se adapte a tu momento.</p>
-            <div className="challenge-grid">
-              {challenges.map((challenge) => (
-                <article
-                  key={challenge.id}
-                  className={`challenge-card${
-                    challenge.id === recommendedId ? " highlight" : ""
-                  }`}
-                >
-                  <h3>{challenge.title}</h3>
-                  <p>{challenge.duration} días de hábitos esenciales.</p>
-                  <ul>
-                    {challenge.habits.map((habit) => (
-                      <li key={habit}>{habit}</li>
-                    ))}
-                  </ul>
-                  {challenge.id === recommendedId && (
-                    <span className="tag">Recomendado para ti</span>
-                  )}
-                  <button type="button" onClick={() => startChallenge(challenge)}>
-                    Elegir este reto
-                  </button>
+          <section className="routine-grid">
+            {suggestedOrder.map((key) => {
+              const routine = routineTemplates[key];
+              const isDone = todayData.completed.includes(key);
+              return (
+                <article key={key} className={`panel routine-card ${routine.color}`}>
+                  <h3>{routine.title}</h3>
+                  <p>{routine.steps[0].helper}</p>
+                  <button onClick={() => startRoutine(key)}>{isDone ? "Repetir suave" : "Vamos suave"}</button>
                 </article>
-              ))}
+              );
+            })}
+          </section>
+
+          <section className="panel compinche-day">
+            <h3>💡 Compinche del día</h3>
+            <p>Hoy te recomiendo esto 💖</p>
+            <div className="compinche-content">
+              <div className="emoji">{compincheOfDay.image}</div>
+              <div>
+                <strong>{compincheOfDay.name}</strong>
+                <p>{compincheOfDay.benefit}</p>
+              </div>
+              <a href={compincheOfDay.link}>Para ti hoy</a>
             </div>
           </section>
-        )}
 
-        {view === viewStates.active && activeChallenge && (
-          <section className="panel">
-            <div className="panel__header">
-              <div>
-                <h2>{activeChallenge.title}</h2>
-                <p>
-                  Día {dayNumber} de {activeChallenge.duration}
-                </p>
-              </div>
-              <button type="button" onClick={() => setView(viewStates.progress)}>
-                Ver progreso
-              </button>
+          <section className="panel badges">
+            <h3>Gamificación emocional</h3>
+            <div className="badge-list">
+              {badges.length ? badges.map((badge) => <span key={badge}>{badge}</span>) : <span>🎖️ Primer logro pendiente</span>}
             </div>
+            {badges.includes("🔓 Calma nivel 2") && <p>Desbloqueaste calma nivel 2</p>}
+          </section>
+        </>
+      )}
 
-            <p className="motivation">{motivation}</p>
+      {screen === "flow" && currentFlow && (
+        <section className={`panel flow-screen ${currentFlow.color}`}>
+          <h2>{currentFlow.title}</h2>
+          <p className="step-chip">Paso {routineStepIndex + 1} de {currentFlow.steps.length}</p>
+          <div className="progress-track"><div className="progress-fill" style={{ width: `${stepProgress}%` }} /></div>
 
-            <div className="progress">
-              <div>
-                <p>Progreso de hoy</p>
-                <strong>{completionPercent}%</strong>
-              </div>
-              <div>
-                <p>Días válidos</p>
-                <strong>
-                  {validDays}/{activeChallenge.duration}
-                </strong>
-              </div>
-              <div>
-                <p>Progreso total</p>
-                <strong>{totalProgress}%</strong>
-              </div>
-            </div>
+          <article className="flow-step">
+            <h3>{currentStep.label}</h3>
+            <p>{currentStep.helper}</p>
 
-            <div className="progress-bar" aria-hidden="true">
-              <div
-                className="progress-bar__fill"
-                style={{ width: `${totalProgress}%` }}
-              />
-            </div>
-
-            {isChallengeComplete && (
-              <div className="completion">
-                <strong>¡Reto completado!</strong>
-                <p>Gracias por priorizarte con constancia amable.</p>
+            {activeRoutine === "journaling" && (
+              <div className="input-block">
+                <p><strong>{todayJournal.title}</strong> · {todayJournal.prompt}</p>
+                <textarea value={routineInput} onChange={(e) => setRoutineInput(e.target.value)} placeholder="Escribe aquí sin juicio" />
+                <button onClick={() => setCelebration("Tus pensamientos también merecen espacio")}>Me quedo con esto</button>
               </div>
             )}
 
-            <ul className="checklist">
-              {activeChallenge.habits.map((habit, index) => (
-                <li key={habit}>
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={todayEntry?.completed?.[index] || false}
-                      onChange={() => updateDailyHabit(index)}
-                    />
-                    <span>{habit}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-            <p className="helper">
-              Un día cuenta como válido al completar al menos el 60% de los
-              hábitos.
-            </p>
-          </section>
-        )}
+            {activeRoutine === "sleep" && routineStepIndex === 1 && (
+              <textarea value={routineInput} onChange={(e) => setRoutineInput(e.target.value)} placeholder="Escribe 1 cosa que te preocupa y suéltala aquí" />
+            )}
 
-        {view === viewStates.progress && activeChallenge && (
-          <section className="panel">
-            <div className="panel__header">
-              <div>
-                <h2>Progreso</h2>
-                <p>{activeChallenge.title}</p>
+            {activeRoutine === "focus" && routineStepIndex === 1 && (
+              <div className="timer-box">
+                <strong>{secondsToClock(timerSeconds)}</strong>
+                <div className="cta-row">
+                  <button onClick={startPomodoro}>Iniciar Pomodoro</button>
+                  <button className="ghost" onClick={() => setTimerRunning((prev) => !prev)}>{timerRunning ? "Pausar" : "Continuar"}</button>
+                </div>
               </div>
-              <button type="button" onClick={() => setView(viewStates.active)}>
-                Volver al reto
-              </button>
-            </div>
-            <p className="motivation">{motivation}</p>
-            <div className="progress-summary">
-              <div>
-                <strong>{validDays}</strong>
-                <span>Días válidos</span>
-              </div>
-              <div>
-                <strong>{activeChallenge.duration}</strong>
-                <span>Días totales</span>
-              </div>
-              <div>
-                <strong>{totalProgress}%</strong>
-                <span>Progreso global</span>
-              </div>
-            </div>
-            <div className="timeline">
-              {Array.from({ length: activeChallenge.duration }, (_, index) => {
-                const dayIndex = index + 1;
-                const entryKey = addDays(activeChallenge.startDate, index);
-                const entry = activeChallenge.daily?.[entryKey] || null;
-                const ratio = getCompletionRatio(entry, activeChallenge.habits);
-                const isValid = ratio >= 0.6;
-                return (
-                  <div key={dayIndex} className="timeline__item">
-                    <span>Día {dayIndex}</span>
-                    <span className={isValid ? "valid" : "pending"}>
-                      {entry ? (isValid ? "Válido" : "En progreso") : "Pendiente"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-      </main>
-    </div>
+            )}
+          </article>
+
+          {celebration && <p className="celebration">{celebration}</p>}
+          <div className="cta-row">
+            <button onClick={nextStep}>{routineStepIndex === currentFlow.steps.length - 1 ? "Cerramos por hoy" : "Siguiente paso"}</button>
+            <button className="ghost" onClick={() => setScreen("home")}>Volver</button>
+          </div>
+          <p className="helper">{routineStepIndex === currentFlow.steps.length - 1 ? currentFlow.close : "Transición suave al siguiente paso"}</p>
+        </section>
+      )}
+    </main>
   );
 }
