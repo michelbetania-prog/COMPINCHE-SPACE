@@ -1,554 +1,329 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  createUserWithEmailAndPassword,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut,
-  updateProfile,
-} from "firebase/auth";
-import {
-  doc,
-  onSnapshot,
-  setDoc,
-  updateDoc,
-} from "firebase/firestore";
-import { auth, db } from "./firebase";
-import { challenges, motivationalMessages } from "./data/challenges";
+import { useMemo, useState } from "react";
 import "./styles.css";
 
-const viewStates = {
-  welcome: "welcome",
-  onboarding: "onboarding",
-  challenges: "challenges",
-  active: "active",
-  progress: "progress",
+const PRODUCT_CATALOG = [
+  {
+    id: "gel-cleanser-basic",
+    name: "Gel limpiador con salicílico 2%",
+    category: "limpieza",
+    tiers: {
+      low: { label: "Opción económica", price: 8, affiliateUrl: "https://amazon.com" },
+      mid: { label: "Opción media", price: 15, affiliateUrl: "https://walmart.com" },
+      premium: { label: "Opción premium", price: 28, affiliateUrl: "https://sephora.com" },
+    },
+    skinTypes: ["grasa", "mixta"],
+    problems: ["acne", "grasa"],
+  },
+  {
+    id: "cleanser-sensitive",
+    name: "Limpiador syndet sin fragancia",
+    category: "limpieza",
+    tiers: {
+      low: { label: "Opción económica", price: 10, affiliateUrl: "https://amazon.com" },
+      mid: { label: "Opción media", price: 18, affiliateUrl: "https://target.com" },
+      premium: { label: "Opción premium", price: 32, affiliateUrl: "https://dermstore.com" },
+    },
+    skinTypes: ["seca", "sensible", "mixta"],
+    problems: ["sensibilidad", "manchas"],
+  },
+  {
+    id: "light-moisturizer",
+    name: "Hidratante ligera oil-free",
+    category: "hidratante",
+    tiers: {
+      low: { label: "Opción económica", price: 9, affiliateUrl: "https://walmart.com" },
+      mid: { label: "Opción media", price: 16, affiliateUrl: "https://amazon.com" },
+      premium: { label: "Opción premium", price: 30, affiliateUrl: "https://sephora.com" },
+    },
+    skinTypes: ["grasa", "mixta", "normal"],
+    problems: ["acne", "grasa", "manchas"],
+  },
+  {
+    id: "spf-gel",
+    name: "Protector solar SPF 50 gel-crema",
+    category: "spf",
+    tiers: {
+      low: { label: "Opción económica", price: 11, affiliateUrl: "https://amazon.com" },
+      mid: { label: "Opción media", price: 19, affiliateUrl: "https://walmart.com" },
+      premium: { label: "Opción premium", price: 36, affiliateUrl: "https://dermstore.com" },
+    },
+    skinTypes: ["grasa", "mixta", "normal", "sensible"],
+    problems: ["manchas", "acne", "sensibilidad"],
+  },
+  {
+    id: "barrier-cream",
+    name: "Crema barrera con ceramidas",
+    category: "hidratante",
+    tiers: {
+      low: { label: "Opción económica", price: 12, affiliateUrl: "https://target.com" },
+      mid: { label: "Opción media", price: 22, affiliateUrl: "https://amazon.com" },
+      premium: { label: "Opción premium", price: 38, affiliateUrl: "https://dermstore.com" },
+    },
+    skinTypes: ["seca", "sensible"],
+    problems: ["sensibilidad", "manchas"],
+  },
+];
+
+const commitmentCap = { bajo: 3, medio: 4, alto: 5 };
+
+const initialQuiz = {
+  skinType: "",
+  problems: [],
+  commitment: "medio",
+  budget: "medio",
 };
 
-const getTodayKey = () => {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+const dayKey = () => new Date().toISOString().slice(0, 10);
+
+const getProfileLabel = ({ skinType, problems }) => {
+  const skin = skinType || "mixta";
+  if (!problems.length) return `Piel ${skin} sin alertas principales`;
+  if (problems.length === 1) return `Piel ${skin} con tendencia a ${problems[0]}`;
+  return `Piel ${skin} con tendencia a ${problems.slice(0, 2).join(" y ")}`;
 };
 
-const addDays = (dateString, daysToAdd) => {
-  const date = new Date(dateString);
-  date.setDate(date.getDate() + daysToAdd);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
+const applyRules = (quiz, elapsedDays = 1, streak = 0) => {
+  const rules = [];
+  let maxSteps = commitmentCap[quiz.commitment] ?? 4;
+  const blockedIngredients = [];
+  const introPlan = ["Día 1-3: limpieza + hidratante", "Día 5: añadir hidratante objetivo", "Día 10: introducir SPF diario"];
 
-const diffInDays = (startDate) => {
-  const start = new Date(startDate);
-  const today = new Date();
-  const startMidnight = new Date(
-    start.getFullYear(),
-    start.getMonth(),
-    start.getDate()
-  );
-  const todayMidnight = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  );
-  return Math.floor((todayMidnight - startMidnight) / (1000 * 60 * 60 * 24));
-};
+  if (quiz.skinType === "grasa" && quiz.problems.includes("acne")) {
+    rules.push("Evitar texturas pesadas y aceites oclusivos");
+    maxSteps = Math.min(maxSteps, 4);
+    introPlan.push("Retinol solo después del día 14");
+  }
 
-const getMotivation = () => {
-  const index = Math.floor(Math.random() * motivationalMessages.length);
-  return motivationalMessages[index];
-};
+  if (quiz.skinType === "sensible" || quiz.problems.includes("sensibilidad")) {
+    blockedIngredients.push("BHA", "retinol", "vitamina C alta concentración");
+    rules.push("Priorizar fórmulas sin fragancia y pH neutro");
+  }
 
-const getCompletionRatio = (dayEntry, habits) => {
-  if (!dayEntry) return 0;
-  const completedCount = Object.values(dayEntry.completed || {}).filter(Boolean)
-    .length;
-  return completedCount / habits.length;
-};
+  if (quiz.commitment === "bajo") {
+    maxSteps = 3;
+    introPlan.push("No introducir activos hasta fase 3");
+    rules.push("Rutina simplificada a pasos esenciales");
+  }
 
-const createDayEntry = (habits) => ({
-  completed: habits.reduce((acc, _, index) => {
-    acc[index] = false;
-    return acc;
-  }, {}),
-});
+  const currentPhase = elapsedDays >= 14 && streak >= 10 ? 2 : 1;
+
+  const baseMorning = ["Limpieza suave", "Hidratante ligera", "Protector solar SPF 50"];
+  const baseNight = ["Limpieza", "Tratamiento objetivo", "Hidratante"];
+
+  const morningSteps = baseMorning.slice(0, maxSteps);
+  const nightSteps = baseNight.slice(0, maxSteps);
+
+  if (currentPhase === 2 && !blockedIngredients.includes("retinol") && maxSteps > 3) {
+    nightSteps.splice(2, 0, "Activo progresivo (retinoide 2 noches/semana)");
+  }
+
+  const picks = PRODUCT_CATALOG.filter((item) => {
+    const skinMatch = item.skinTypes.includes(quiz.skinType);
+    const problemMatch = quiz.problems.some((problem) => item.problems.includes(problem));
+    return skinMatch || problemMatch;
+  }).slice(0, 4);
+
+  const normalizedBudget = quiz.budget === "bajo" ? "low" : quiz.budget === "medio" ? "mid" : "premium";
+  const productRecommendations = picks.map((item) => ({
+    category: item.category,
+    name: item.name,
+    economical: item.tiers.low,
+    middle: item.tiers.mid,
+    premium: item.tiers.premium,
+    prioritized: item.tiers[normalizedBudget],
+  }));
+
+  return {
+    profileLabel: getProfileLabel(quiz),
+    morningSteps,
+    nightSteps,
+    rules,
+    blockedIngredients,
+    introPlan,
+    phase: currentPhase,
+    productRecommendations,
+  };
+};
 
 export default function App() {
-  const [authUser, setAuthUser] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [view, setView] = useState(viewStates.welcome);
-  const [formState, setFormState] = useState({
-    email: "",
-    password: "",
-    name: "",
-  });
-  const [authError, setAuthError] = useState("");
-  const [motivation, setMotivation] = useState(getMotivation());
+  const [screen, setScreen] = useState("landing");
+  const [quiz, setQuiz] = useState(initialQuiz);
+  const [savedRoutine, setSavedRoutine] = useState(null);
+  const [habitLog, setHabitLog] = useState({});
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setAuthUser(user);
-      if (!user) {
-        setProfile(null);
-        setView(viewStates.welcome);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!authUser) return undefined;
-
-    const userRef = doc(db, "users", authUser.uid);
-    const unsubscribe = onSnapshot(userRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        const baseProfile = {
-          displayName: authUser.displayName || "",
-          onboarded: false,
-          recommendedChallengeId: "",
-          activeChallenge: null,
-        };
-        setDoc(userRef, baseProfile, { merge: true });
-        setProfile(baseProfile);
-        setView(viewStates.onboarding);
-        return;
-      }
-
-      const data = snapshot.data();
-      setProfile(data);
-      if (!data.onboarded) {
-        setView(viewStates.onboarding);
-      } else if (!data.activeChallenge) {
-        setView(viewStates.challenges);
-      } else {
-        setView(viewStates.active);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [authUser]);
-
-  useEffect(() => {
-    setMotivation(getMotivation());
-  }, [view]);
-
-  const handleAuthChange = (event) => {
-    setFormState((prev) => ({ ...prev, [event.target.name]: event.target.value }));
-  };
-
-  const handleRegister = async (event) => {
-    event.preventDefault();
-    setAuthError("");
-    const { email, password, name } = formState;
-    try {
-      const credential = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        password
-      );
-      if (name) {
-        await updateProfile(credential.user, { displayName: name });
-      }
-    } catch (error) {
-      setAuthError(error.message);
+  const streak = useMemo(() => {
+    const entries = Object.keys(habitLog).sort().reverse();
+    let count = 0;
+    for (const key of entries) {
+      if (habitLog[key]?.morning && habitLog[key]?.night) count += 1;
+      else break;
     }
+    return count;
+  }, [habitLog]);
+
+  const elapsedDays = useMemo(() => {
+    if (!savedRoutine?.createdAt) return 1;
+    const start = new Date(savedRoutine.createdAt);
+    const now = new Date();
+    return Math.max(1, Math.floor((now - start) / (1000 * 60 * 60 * 24)) + 1);
+  }, [savedRoutine]);
+
+  const generated = useMemo(() => applyRules(quiz, elapsedDays, streak), [quiz, elapsedDays, streak]);
+
+  const toggleProblem = (problem) => {
+    setQuiz((prev) => ({
+      ...prev,
+      problems: prev.problems.includes(problem)
+        ? prev.problems.filter((p) => p !== problem)
+        : [...prev.problems, problem],
+    }));
   };
 
-  const handleLogin = async (event) => {
-    event.preventDefault();
-    setAuthError("");
-    const { email, password } = formState;
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      setAuthError(error.message);
-    }
+  const saveRoutine = () => {
+    setSavedRoutine({ quiz, routine: generated, createdAt: new Date().toISOString(), plan: "free" });
+    setScreen("dashboard");
   };
 
-  const handleLogout = async () => {
-    await signOut(auth);
-  };
-
-  const handleOnboarding = async (recommendedId) => {
-    if (!authUser) return;
-    await updateDoc(doc(db, "users", authUser.uid), {
-      onboarded: true,
-      recommendedChallengeId: recommendedId,
-    });
-    setView(viewStates.challenges);
-  };
-
-  const startChallenge = async (challenge) => {
-    if (!authUser) return;
-    const startDate = new Date().toISOString();
-    const dayKey = getTodayKey();
-    const dayEntry = createDayEntry(challenge.habits);
-
-    await updateDoc(doc(db, "users", authUser.uid), {
-      activeChallenge: {
-        id: challenge.id,
-        title: challenge.title,
-        duration: challenge.duration,
-        habits: challenge.habits,
-        startDate,
-        daily: {
-          [dayKey]: dayEntry,
-        },
+  const markHabit = (slot) => {
+    const today = dayKey();
+    setHabitLog((prev) => ({
+      ...prev,
+      [today]: {
+        ...prev[today],
+        [slot]: !prev[today]?.[slot],
       },
-    });
-    setView(viewStates.active);
+    }));
   };
-
-  const updateDailyHabit = async (habitIndex) => {
-    if (!authUser || !profile?.activeChallenge) return;
-    const dayKey = getTodayKey();
-    const activeChallenge = profile.activeChallenge;
-    const existingDay =
-      activeChallenge.daily?.[dayKey] || createDayEntry(activeChallenge.habits);
-
-    const updatedDay = {
-      ...existingDay,
-      completed: {
-        ...existingDay.completed,
-        [habitIndex]: !existingDay.completed?.[habitIndex],
-      },
-    };
-
-    await updateDoc(doc(db, "users", authUser.uid), {
-      [`activeChallenge.daily.${dayKey}`]: updatedDay,
-    });
-  };
-
-  const ensureToday = async () => {
-    if (!authUser || !profile?.activeChallenge) return;
-    const dayKey = getTodayKey();
-    const activeChallenge = profile.activeChallenge;
-    if (activeChallenge.daily?.[dayKey]) return;
-
-    const dayEntry = createDayEntry(activeChallenge.habits);
-    await updateDoc(doc(db, "users", authUser.uid), {
-      [`activeChallenge.daily.${dayKey}`]: dayEntry,
-    });
-  };
-
-  useEffect(() => {
-    ensureToday();
-  }, [profile?.activeChallenge]);
-
-  const activeChallenge = profile?.activeChallenge;
-  const todayKey = getTodayKey();
-
-  const todayEntry = useMemo(() => {
-    if (!activeChallenge) return null;
-    return activeChallenge.daily?.[todayKey] || null;
-  }, [activeChallenge, todayKey]);
-
-  const completionRatio = useMemo(() => {
-    if (!activeChallenge) return 0;
-    return getCompletionRatio(todayEntry, activeChallenge.habits);
-  }, [activeChallenge, todayEntry]);
-
-  const completionPercent = Math.round(completionRatio * 100);
-
-  const validDays = useMemo(() => {
-    if (!activeChallenge) return 0;
-    const entries = Object.values(activeChallenge.daily || {});
-    return entries.filter(
-      (entry) => getCompletionRatio(entry, activeChallenge.habits) >= 0.6
-    ).length;
-  }, [activeChallenge]);
-
-  const totalProgress = useMemo(() => {
-    if (!activeChallenge) return 0;
-    return Math.min(
-      100,
-      Math.round((validDays / activeChallenge.duration) * 100)
-    );
-  }, [activeChallenge, validDays]);
-
-  const dayNumber = useMemo(() => {
-    if (!activeChallenge) return 1;
-    const diff = diffInDays(activeChallenge.startDate) + 1;
-    return Math.min(activeChallenge.duration, Math.max(1, diff));
-  }, [activeChallenge]);
-
-  const isChallengeComplete =
-    activeChallenge && validDays >= activeChallenge.duration;
-
-  const recommendedId = profile?.recommendedChallengeId;
 
   return (
-    <div className="app">
-      <header className="app__header">
+    <main className="app">
+      <header className="topbar">
         <div>
-          <p className="eyebrow">Retos suaves de hábitos</p>
-          <h1>Constancia amable</h1>
+          <p className="eyebrow">Compinche Space</p>
+          <h1>Plataforma de autocuidado con lógica de negocio</h1>
         </div>
-        {authUser && (
-          <button className="link" type="button" onClick={handleLogout}>
-            Cerrar sesión
-          </button>
-        )}
+        {screen !== "landing" && <button onClick={() => setScreen("landing")}>Inicio</button>}
       </header>
 
-      <main className="app__main">
-        {authUser && !profile && (
-          <section className="panel">
-            <h2>Preparando tu espacio</h2>
-            <p>Estamos sincronizando tu información de hábitos.</p>
-          </section>
-        )}
-        {view === viewStates.welcome && (
-          <section className="panel">
-            <h2>Bienvenida</h2>
-            <p>
-              Esta app te acompaña a cumplir pequeños hábitos diarios con calma y
-              sin presión.
-            </p>
-            <div className="auth">
-              <form className="card" onSubmit={handleRegister}>
-                <h3>Crear cuenta</h3>
-                <label>
-                  Nombre
-                  <input
-                    name="name"
-                    value={formState.name}
-                    onChange={handleAuthChange}
-                    placeholder="Tu nombre"
-                  />
-                </label>
-                <label>
-                  Correo
-                  <input
-                    type="email"
-                    name="email"
-                    value={formState.email}
-                    onChange={handleAuthChange}
-                    placeholder="tu@email.com"
-                    required
-                  />
-                </label>
-                <label>
-                  Contraseña
-                  <input
-                    type="password"
-                    name="password"
-                    value={formState.password}
-                    onChange={handleAuthChange}
-                    placeholder="••••••"
-                    required
-                  />
-                </label>
-                <button type="submit">Crear cuenta</button>
-              </form>
-              <form className="card" onSubmit={handleLogin}>
-                <h3>Iniciar sesión</h3>
-                <p className="helper">
-                  Usa el mismo correo y contraseña.
-                </p>
-                <label>
-                  Correo
-                  <input
-                    type="email"
-                    name="email"
-                    value={formState.email}
-                    onChange={handleAuthChange}
-                    placeholder="tu@email.com"
-                    required
-                  />
-                </label>
-                <label>
-                  Contraseña
-                  <input
-                    type="password"
-                    name="password"
-                    value={formState.password}
-                    onChange={handleAuthChange}
-                    placeholder="••••••"
-                    required
-                  />
-                </label>
-                <button type="submit">Entrar</button>
-              </form>
-            </div>
-            {authError && <p className="error">{authError}</p>}
-          </section>
-        )}
+      {screen === "landing" && (
+        <section className="panel hero">
+          <h2>Descubre tu rutina ideal en 2 minutos</h2>
+          <p>Diagnóstico guiado + motor de reglas + progresión por adherencia.</p>
+          <button onClick={() => setScreen("quiz")}>Hacer diagnóstico</button>
+        </section>
+      )}
 
-        {view === viewStates.onboarding && (
-          <section className="panel">
-            <h2>Onboarding rápido</h2>
-            <p>
-              Responde con honestidad: ¿qué ritmo sientes más realista para ti?
-            </p>
-            <div className="choices">
-              <button
-                type="button"
-                onClick={() => handleOnboarding("reto-15")}
-              >
-                Quiero empezar suave (15 días)
+      {screen === "quiz" && (
+        <section className="panel">
+          <h2>Quiz de diagnóstico</h2>
+          <div className="grid">
+            <label>
+              Tipo de piel
+              <select value={quiz.skinType} onChange={(e) => setQuiz({ ...quiz, skinType: e.target.value })}>
+                <option value="">Selecciona...</option>
+                <option value="grasa">Grasa</option>
+                <option value="mixta">Mixta</option>
+                <option value="seca">Seca</option>
+                <option value="sensible">Sensible</option>
+              </select>
+            </label>
+            <label>
+              Compromiso
+              <select value={quiz.commitment} onChange={(e) => setQuiz({ ...quiz, commitment: e.target.value })}>
+                <option value="bajo">Bajo</option>
+                <option value="medio">Medio</option>
+                <option value="alto">Alto</option>
+              </select>
+            </label>
+            <label>
+              Presupuesto
+              <select value={quiz.budget} onChange={(e) => setQuiz({ ...quiz, budget: e.target.value })}>
+                <option value="bajo">Bajo</option>
+                <option value="medio">Medio</option>
+                <option value="alto">Alto</option>
+              </select>
+            </label>
+          </div>
+          <p className="label">Problemas principales</p>
+          <div className="chips">
+            {["acne", "manchas", "grasa", "sensibilidad"].map((problem) => (
+              <button key={problem} className={quiz.problems.includes(problem) ? "chip active" : "chip"} onClick={() => toggleProblem(problem)}>
+                {problem}
               </button>
-              <button
-                type="button"
-                onClick={() => handleOnboarding("reto-21")}
-              >
-                Puedo comprometerme más (21 días)
-              </button>
-            </div>
-            <p className="helper">
-              Recomendaremos un reto, pero siempre podrás elegir.
-            </p>
-          </section>
-        )}
+            ))}
+          </div>
+          <button disabled={!quiz.skinType || quiz.problems.length === 0} onClick={() => setScreen("results")}>Ver resultado</button>
+        </section>
+      )}
 
-        {view === viewStates.challenges && (
-          <section className="panel">
-            <h2>Elige tu reto</h2>
-            <p>Selecciona el desafío que mejor se adapte a tu momento.</p>
-            <div className="challenge-grid">
-              {challenges.map((challenge) => (
-                <article
-                  key={challenge.id}
-                  className={`challenge-card${
-                    challenge.id === recommendedId ? " highlight" : ""
-                  }`}
-                >
-                  <h3>{challenge.title}</h3>
-                  <p>{challenge.duration} días de hábitos esenciales.</p>
-                  <ul>
-                    {challenge.habits.map((habit) => (
-                      <li key={habit}>{habit}</li>
-                    ))}
-                  </ul>
-                  {challenge.id === recommendedId && (
-                    <span className="tag">Recomendado para ti</span>
-                  )}
-                  <button type="button" onClick={() => startChallenge(challenge)}>
-                    Elegir este reto
-                  </button>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
+      {screen === "results" && (
+        <section className="panel">
+          <h2>Resultado personalizado</h2>
+          <p><strong>Perfil:</strong> {generated.profileLabel}</p>
+          <div className="split">
+            <article>
+              <h3>Mañana</h3>
+              <ol>{generated.morningSteps.map((step) => <li key={step}>{step}</li>)}</ol>
+            </article>
+            <article>
+              <h3>Noche</h3>
+              <ol>{generated.nightSteps.map((step) => <li key={step}>{step}</li>)}</ol>
+            </article>
+          </div>
 
-        {view === viewStates.active && activeChallenge && (
-          <section className="panel">
-            <div className="panel__header">
-              <div>
-                <h2>{activeChallenge.title}</h2>
-                <p>
-                  Día {dayNumber} de {activeChallenge.duration}
-                </p>
+          <h3>Productos recomendados con afiliados</h3>
+          <div className="cards">
+            {generated.productRecommendations.map((product) => (
+              <div key={product.name} className="card">
+                <p><strong>{product.name}</strong></p>
+                <a href={product.economical.affiliateUrl}>Económica (${product.economical.price})</a>
+                <a href={product.middle.affiliateUrl}>Media (${product.middle.price})</a>
+                <a href={product.premium.affiliateUrl}>Premium (${product.premium.price})</a>
               </div>
-              <button type="button" onClick={() => setView(viewStates.progress)}>
-                Ver progreso
-              </button>
-            </div>
+            ))}
+          </div>
 
-            <p className="motivation">{motivation}</p>
+          <div className="cta-row">
+            <button onClick={saveRoutine}>Guarda tu rutina gratis</button>
+            <button className="secondary" onClick={() => setScreen("dashboard")}>Desbloquea tu rutina inteligente que evoluciona contigo</button>
+          </div>
+        </section>
+      )}
 
-            <div className="progress">
-              <div>
-                <p>Progreso de hoy</p>
-                <strong>{completionPercent}%</strong>
+      {screen === "dashboard" && (
+        <section className="panel">
+          <h2>Dashboard</h2>
+          <p>Fase actual: <strong>{generated.phase}</strong> · Streak: <strong>{streak}</strong> días</p>
+          <div className="split">
+            <article>
+              <h3>Rutina actual</h3>
+              <p>Mañana y noche por día:</p>
+              <ul>
+                <li>Lunes a domingo (mañana): {generated.morningSteps.join(" → ")}</li>
+                <li>Lunes a domingo (noche): {generated.nightSteps.join(" → ")}</li>
+              </ul>
+            </article>
+            <article>
+              <h3>Tracker de hábitos</h3>
+              <p>Día {elapsedDays}: marca completado para habilitar progresión.</p>
+              <div className="cta-row">
+                <button onClick={() => markHabit("morning")}>Check mañana</button>
+                <button onClick={() => markHabit("night")}>Check noche</button>
               </div>
-              <div>
-                <p>Días válidos</p>
-                <strong>
-                  {validDays}/{activeChallenge.duration}
-                </strong>
-              </div>
-              <div>
-                <p>Progreso total</p>
-                <strong>{totalProgress}%</strong>
-              </div>
-            </div>
+              <p>Hoy: mañana {habitLog[dayKey()]?.morning ? "✅" : "⬜"} · noche {habitLog[dayKey()]?.night ? "✅" : "⬜"}</p>
+            </article>
+          </div>
 
-            <div className="progress-bar" aria-hidden="true">
-              <div
-                className="progress-bar__fill"
-                style={{ width: `${totalProgress}%` }}
-              />
-            </div>
-
-            {isChallengeComplete && (
-              <div className="completion">
-                <strong>¡Reto completado!</strong>
-                <p>Gracias por priorizarte con constancia amable.</p>
-              </div>
-            )}
-
-            <ul className="checklist">
-              {activeChallenge.habits.map((habit, index) => (
-                <li key={habit}>
-                  <label className="checkbox">
-                    <input
-                      type="checkbox"
-                      checked={todayEntry?.completed?.[index] || false}
-                      onChange={() => updateDailyHabit(index)}
-                    />
-                    <span>{habit}</span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-            <p className="helper">
-              Un día cuenta como válido al completar al menos el 60% de los
-              hábitos.
-            </p>
-          </section>
-        )}
-
-        {view === viewStates.progress && activeChallenge && (
-          <section className="panel">
-            <div className="panel__header">
-              <div>
-                <h2>Progreso</h2>
-                <p>{activeChallenge.title}</p>
-              </div>
-              <button type="button" onClick={() => setView(viewStates.active)}>
-                Volver al reto
-              </button>
-            </div>
-            <p className="motivation">{motivation}</p>
-            <div className="progress-summary">
-              <div>
-                <strong>{validDays}</strong>
-                <span>Días válidos</span>
-              </div>
-              <div>
-                <strong>{activeChallenge.duration}</strong>
-                <span>Días totales</span>
-              </div>
-              <div>
-                <strong>{totalProgress}%</strong>
-                <span>Progreso global</span>
-              </div>
-            </div>
-            <div className="timeline">
-              {Array.from({ length: activeChallenge.duration }, (_, index) => {
-                const dayIndex = index + 1;
-                const entryKey = addDays(activeChallenge.startDate, index);
-                const entry = activeChallenge.daily?.[entryKey] || null;
-                const ratio = getCompletionRatio(entry, activeChallenge.habits);
-                const isValid = ratio >= 0.6;
-                return (
-                  <div key={dayIndex} className="timeline__item">
-                    <span>Día {dayIndex}</span>
-                    <span className={isValid ? "valid" : "pending"}>
-                      {entry ? (isValid ? "Válido" : "En progreso") : "Pendiente"}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-      </main>
-    </div>
+          <h3>Sistema de progresión</h3>
+          <ul>
+            {generated.introPlan.map((rule) => <li key={rule}>{rule}</li>)}
+          </ul>
+          <h3>Reglas activas del motor</h3>
+          <ul>
+            {generated.rules.map((rule) => <li key={rule}>{rule}</li>)}
+          </ul>
+        </section>
+      )}
+    </main>
   );
 }
